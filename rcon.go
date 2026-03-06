@@ -46,7 +46,7 @@ func Connect(addr, password string) (*RCONClient, error) {
 
 	// Authenticate
 	if err := c.auth(password); err != nil {
-		c.conn.Close()
+		_ = c.conn.Close()
 		return nil, fmt.Errorf("rcon auth failed: %w", err)
 	}
 
@@ -55,7 +55,7 @@ func Connect(addr, password string) (*RCONClient, error) {
 
 // readPacket reads a single RCON packet from the TCP stream.
 func (c *RCONClient) readPacket() (id int32, pType int32, body string, err error) {
-	c.conn.SetReadDeadline(time.Now().Add(c.timeout))
+	_ = c.conn.SetReadDeadline(time.Now().Add(c.timeout))
 
 	// Read packet size (4 bytes)
 	var size int32
@@ -86,15 +86,15 @@ func (c *RCONClient) readPacket() (id int32, pType int32, body string, err error
 
 // writePacket constructs and sends an RCON packet
 func (c *RCONClient) writePacket(id int32, pType int32, body string) error {
-	c.conn.SetWriteDeadline(time.Now().Add(c.timeout))
+	_ = c.conn.SetWriteDeadline(time.Now().Add(c.timeout))
 
 	bodyBytes := []byte(body)
 	size := int32(len(bodyBytes) + packetHeaderSize)
 
 	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.LittleEndian, size)
-	binary.Write(buf, binary.LittleEndian, id)
-	binary.Write(buf, binary.LittleEndian, pType)
+	_ = binary.Write(buf, binary.LittleEndian, size)
+	_ = binary.Write(buf, binary.LittleEndian, id)
+	_ = binary.Write(buf, binary.LittleEndian, pType)
 	buf.Write(bodyBytes)
 	buf.Write([]byte{0x00, 0x00})
 

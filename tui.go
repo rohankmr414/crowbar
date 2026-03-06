@@ -263,7 +263,9 @@ func executeRCON(addr, password, cmd string) tea.Cmd {
 		if err != nil {
 			return rconResponseMsg{cmd: cmd, err: err}
 		}
-		defer c.Close()
+		defer func() {
+			_ = c.Close()
+		}()
 
 		resp, err := c.Execute(cmd)
 		return rconResponseMsg{cmd: cmd, response: resp, err: err}
@@ -287,7 +289,9 @@ func (m model) Init() tea.Cmd {
 			if err != nil {
 				return logLineMsg(m.theme.ErrorLog.Render("✗ Failed to register log address: " + err.Error()))
 			}
-			defer c.Close()
+			defer func() {
+				_ = c.Close()
+			}()
 			cmd := fmt.Sprintf("logaddress_add %s:%d", m.publicIP, m.logListener.Port())
 			_, err = c.Execute(cmd)
 			if err != nil {
@@ -309,7 +313,9 @@ func findOnServer(addr, password, prefix string) tea.Cmd {
 		if err != nil {
 			return findResultMsg{prefix: prefix, err: err}
 		}
-		defer client.Close()
+		defer func() {
+			_ = client.Close()
+		}()
 
 		resp, err := client.Execute("find " + prefix)
 		if err != nil {
@@ -345,11 +351,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMsg:
 		// Basic mouse wheel scroll for viewport
-		switch msg.Type {
-		case tea.MouseWheelUp:
-			m.viewport.LineUp(3)
-		case tea.MouseWheelDown:
-			m.viewport.LineDown(3)
+		switch msg.Action {
+		case tea.MouseActionPress:
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				m.viewport.ScrollUp(3)
+			case tea.MouseButtonWheelDown:
+				m.viewport.ScrollDown(3)
+			}
 		}
 		// Return early to prevent mouse events from falling through to the text input
 		// which causes raw ANSI escape sequences to be typed into the command line.
@@ -462,11 +471,11 @@ func (m *model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPgUp:
-		m.viewport.HalfViewUp()
+		m.viewport.HalfPageUp()
 		return m, nil
 
 	case tea.KeyPgDown:
-		m.viewport.HalfViewDown()
+		m.viewport.HalfPageDown()
 		return m, nil
 
 	default:

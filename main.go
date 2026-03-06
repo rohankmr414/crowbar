@@ -38,8 +38,9 @@ func main() {
 		fmt.Printf("Failed to start log listener on port %d: %v\n", *logPort, err)
 		os.Exit(1)
 	}
-	logListener.Start()
-	defer logListener.Close()
+	defer func() {
+		_ = logListener.Close()
+	}()
 
 	// Connect via RCON.
 	fmt.Printf("Connecting to %s...\n", serverAddr)
@@ -49,7 +50,9 @@ func main() {
 		fmt.Println("Starting in disconnected mode. You can still view log output.")
 		rconClient = nil
 	} else {
-		defer rconClient.Close()
+		defer func() {
+			_ = rconClient.Close()
+		}()
 	}
 
 	// Auto-detect public IP if not specified.
