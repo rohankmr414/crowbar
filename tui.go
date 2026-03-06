@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -492,6 +493,24 @@ func (m *model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	default:
 		var inputCmd tea.Cmd
 		m.textInput, inputCmd = m.textInput.Update(msg)
+
+		// Sanitize mouse event leaks. When scrolling rapidly, some terminal emulators
+		// drop the \x1b byte, causing raw SGR mouse sequences to bleed into the text input.
+		val := m.textInput.Value()
+		if strings.Contains(val, "<") || strings.Contains(val, "M") || strings.Contains(val, "m") {
+			// Matches [<65;101;49M or <65;101;49M
+			re := regexp.MustCompile(`(?:\[<|<)\d+;\d+;\d+[mM]`)
+			newVal := re.ReplaceAllString(val, "")
+
+			// Also strip the rogue `)` character that sometimes prefixes these in VTE terminals
+			newVal = strings.ReplaceAll(newVal, ") [<", "[<")
+			newVal = strings.ReplaceAll(newVal, ") <", "<")
+
+			if newVal != val {
+				m.textInput.SetValue(newVal)
+			}
+		}
+
 		m.updateSuggestions()
 		findCmd := m.maybeFindOnServer()
 		if findCmd != nil {
