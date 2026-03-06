@@ -626,10 +626,6 @@ func (m *model) refreshSuggestions() {
 		return
 	}
 
-	if len(matches) > maxAutocompleteSuggestions {
-		matches = matches[:maxAutocompleteSuggestions]
-	}
-
 	m.suggestions = matches
 	m.showSuggestions = len(matches) > 0
 	if m.selectedIdx >= len(matches) {
@@ -735,7 +731,28 @@ func (m model) View() string {
 	// Autocomplete popup (rendered between log panel and input)
 	if m.showSuggestions && len(m.suggestions) > 0 {
 		var items []string
-		for i, s := range m.suggestions {
+
+		// Calculate the rolling window to display
+		startIdx := 0
+		endIdx := len(m.suggestions)
+
+		if len(m.suggestions) > maxAutocompleteSuggestions {
+			// Center the window around the currently selected item
+			startIdx = m.selectedIdx - (maxAutocompleteSuggestions / 2)
+
+			// Bound checks
+			if startIdx < 0 {
+				startIdx = 0
+			}
+			endIdx = startIdx + maxAutocompleteSuggestions
+			if endIdx > len(m.suggestions) {
+				endIdx = len(m.suggestions)
+				startIdx = endIdx - maxAutocompleteSuggestions
+			}
+		}
+
+		for i := startIdx; i < endIdx; i++ {
+			s := m.suggestions[i]
 			cmd := m.theme.AutocompleteCmd.Render(s.Name)
 			desc := m.theme.AutocompleteDesc.Render(" — " + s.Description)
 			line := cmd + desc
@@ -747,6 +764,16 @@ func (m model) View() string {
 			}
 			items = append(items, line)
 		}
+
+		// Add scroll indicator hints if needed
+		dimStyle := lipgloss.NewStyle().Foreground(m.theme.Dim)
+		if startIdx > 0 {
+			items[0] = dimStyle.Render("   ▲ more")
+		}
+		if endIdx < len(m.suggestions) {
+			items[len(items)-1] = dimStyle.Render("   ▼ more")
+		}
+
 		acBox := m.theme.AutocompleteBox.Render(strings.Join(items, "\n"))
 		sections = append(sections, acBox)
 	}
