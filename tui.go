@@ -524,7 +524,8 @@ func (m *model) handleEnter() (tea.Model, tea.Cmd) {
 	input := strings.TrimSpace(m.textInput.Value())
 
 	// Intercept local commands before autocomplete
-	if strings.ToLower(input) == "clear" {
+	lowerInput := strings.ToLower(input)
+	if lowerInput == "clear" {
 		m.textInput.SetValue("")
 		m.showSuggestions = false
 		m.history = append(m.history, input)
@@ -533,6 +534,8 @@ func (m *model) handleEnter() (tea.Model, tea.Cmd) {
 		m.logLines = []string{}
 		m.viewport.SetContent("")
 		return m, nil
+	} else if lowerInput == "exit" || lowerInput == "quit" {
+		return m, tea.Quit
 	}
 
 	// If autocomplete is showing and an item is selected, apply it.
