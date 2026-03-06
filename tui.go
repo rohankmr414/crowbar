@@ -603,11 +603,27 @@ func (m *model) refreshSuggestions() {
 		return
 	}
 
-	// Collect all matching commands from cached server find results.
 	seen := make(map[string]bool)
 	var matches []Command
+
+	// Inject local commands first so they appear at the top
+	localCommands := []Command{
+		{Name: "clear", Description: "Clear the local log viewport"},
+		{Name: "exit", Description: "Close the crowbar application"},
+		{Name: "quit", Description: "Close the crowbar application"},
+	}
+
+	for _, c := range localCommands {
+		if strings.HasPrefix(c.Name, strings.ToLower(input)) {
+			matches = append(matches, c)
+			seen[c.Name] = true
+		}
+	}
+
 	for _, cmds := range m.findCache {
 		for _, c := range cmds {
+			// Don't accidentally override our local commands with the server's version
+			// (e.g., the server's "exit" command shutting down the actual game server)
 			if !seen[c.Name] && strings.HasPrefix(strings.ToLower(c.Name), strings.ToLower(input)) {
 				matches = append(matches, c)
 				seen[c.Name] = true
