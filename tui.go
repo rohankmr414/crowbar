@@ -525,7 +525,8 @@ func (m *model) handleEnter() (tea.Model, tea.Cmd) {
 
 	// Intercept local commands before autocomplete
 	lowerInput := strings.ToLower(input)
-	if lowerInput == "clear" {
+	switch lowerInput {
+	case "clear":
 		m.textInput.SetValue("")
 		m.showSuggestions = false
 		m.history = append(m.history, input)
@@ -534,7 +535,7 @@ func (m *model) handleEnter() (tea.Model, tea.Cmd) {
 		m.logLines = []string{}
 		m.viewport.SetContent("")
 		return m, nil
-	} else if lowerInput == "exit" || lowerInput == "quit" {
+	case "exit", "quit":
 		return m, tea.Quit
 	}
 
