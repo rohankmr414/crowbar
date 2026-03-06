@@ -16,11 +16,21 @@ Works with **CS:GO, CS2, TF2, Garry's Mod, L4D2, Rust**, and any other game usin
 
 ## Install
 
+### Download Binaries (Recommended)
+
+You can download pre-compiled binaries for **Windows, macOS, and Linux** from the [Releases page](https://github.com/rohankmr414/crowbar/releases/latest).
+
+Extract the archive and run the `crowbar` executable from your terminal.
+
+---
+
+### Build from Source
+
 ```bash
-# From source
+# Using go install
 go install github.com/rohankmr414/crowbar@latest
 
-# Or clone and build
+# Or clone and build manually
 git clone https://github.com/rohankmr414/crowbar.git
 cd crowbar
 go build -o crowbar .
