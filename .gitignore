@@ -32,3 +32,5 @@ go.work.sum
 .vscode/
 
 crowbar
+# Added by goreleaser init:
+dist/
