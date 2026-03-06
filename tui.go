@@ -360,6 +360,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if msg.Type == tea.MouseWheelDown {
 			m.viewport.LineDown(3)
 		}
+		// Return early to prevent mouse events from falling through to the text input
+		// which causes raw ANSI escape sequences to be typed into the command line.
 		return m, nil
 
 	case tea.WindowSizeMsg:
