@@ -63,7 +63,7 @@ func (c *RCONClient) readPacket() (id int32, pType int32, body string, err error
 		return 0, 0, "", err
 	}
 
-	if size < 10 || size > 8192 {
+	if size < packetHeaderSize || size > 8192 {
 		return 0, 0, "", fmt.Errorf("invalid packet size: %d", size)
 	}
 
@@ -89,7 +89,7 @@ func (c *RCONClient) writePacket(id int32, pType int32, body string) error {
 	c.conn.SetWriteDeadline(time.Now().Add(c.timeout))
 
 	bodyBytes := []byte(body)
-	size := int32(len(bodyBytes) + 10)
+	size := int32(len(bodyBytes) + packetHeaderSize)
 
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.LittleEndian, size)
