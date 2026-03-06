@@ -169,11 +169,6 @@ type rconResponseMsg struct {
 	reconnected bool // indicates if we had to auto-reconnect before sending
 }
 
-// connectResultMsg is returned after attempting to register log address.
-type connectResultMsg struct {
-	err error
-}
-
 // findResultMsg is returned after querying the server with `find <prefix>`.
 type findResultMsg struct {
 	prefix   string
@@ -275,16 +270,6 @@ func executeRCON(addr, password, cmd string) tea.Cmd {
 	}
 }
 
-// registerLogAddress tells the server to send logs to our listener
-// using our detected public IP.
-func registerLogAddress(client *RCONClient, publicIP string, port int) tea.Cmd {
-	return func() tea.Msg {
-		cmd := fmt.Sprintf("logaddress_add %s:%d", publicIP, port)
-		_, err := client.Execute(cmd)
-		return connectResultMsg{err: err}
-	}
-}
-
 func (m model) Init() tea.Cmd {
 	var cmds []tea.Cmd
 
@@ -300,12 +285,16 @@ func (m model) Init() tea.Cmd {
 		cmds = append(cmds, func() tea.Msg {
 			c, err := Connect(m.serverAddr, m.rconPassword)
 			if err != nil {
-				return connectResultMsg{err: err}
+				return logLineMsg(m.theme.ErrorLog.Render("✗ Failed to register log address: " + err.Error()))
 			}
 			defer c.Close()
 			cmd := fmt.Sprintf("logaddress_add %s:%d", m.publicIP, m.logListener.Port())
 			_, err = c.Execute(cmd)
-			return connectResultMsg{err: err}
+			if err != nil {
+				return logLineMsg(m.theme.ErrorLog.Render("✗ Failed to register log address: " + err.Error()))
+			}
+			return logLineMsg(lipgloss.NewStyle().Foreground(m.theme.Success).Render(
+				fmt.Sprintf("✓ Log streaming registered on port %d", m.logListener.Port())))
 		})
 	}
 
@@ -356,9 +345,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMsg:
 		// Basic mouse wheel scroll for viewport
-		if msg.Type == tea.MouseWheelUp {
+		switch msg.Type {
+		case tea.MouseWheelUp:
 			m.viewport.LineUp(3)
-		} else if msg.Type == tea.MouseWheelDown {
+		case tea.MouseWheelDown:
 			m.viewport.LineDown(3)
 		}
 		// Return early to prevent mouse events from falling through to the text input
@@ -393,17 +383,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.appendLog(m.theme.Response.Render("  " + line))
 				}
 			}
-		}
-		m.viewport.SetContent(strings.Join(m.logLines, "\n"))
-		m.viewport.GotoBottom()
-		return m, nil
-
-	case connectResultMsg:
-		if msg.err != nil {
-			m.appendLog(m.theme.ErrorLog.Render("✗ Failed to register log address: " + msg.err.Error()))
-		} else {
-			m.appendLog(lipgloss.NewStyle().Foreground(m.theme.Success).Render(
-				fmt.Sprintf("✓ Log streaming registered on port %d", m.logListener.Port())))
 		}
 		m.viewport.SetContent(strings.Join(m.logLines, "\n"))
 		m.viewport.GotoBottom()
