@@ -154,22 +154,22 @@ func (c *RCONClient) Execute(cmd string) (string, error) {
 		return "", fmt.Errorf("rcon execute %q: %w", cmd, err)
 	}
 
-	// 2. Send an empty dummy packet with a known ID.
-	// The Source engine will process the commands sequentially. Because large outputs
-	// are split into multiple packets of ~4KB, we don't know how many packets to read.
-	// However, the engine will mirror back the dummy packet ID *after* it has finished
-	// sending all packets for the first command.
+	// 2. Send an empty SERVERDATA_RESPONSE_VALUE (type 0) packet with a known ID.
+	// This is an "erroneous" request that SRCDS mirrors back to the client rather than
+	// executing. Because the server responds to requests in order, receiving this
+	// mirrored packet guarantees all meaningful response packets have been received.
+	// After the mirror, SRCDS also sends a follow-up packet with body 0x00000001 0x00000000.
+	// Reference: https://developer.valvesoftware.com/wiki/Source_RCON_Protocol#Multiple-packet_Responses
 	dummyID := c.packetIDSequence
 	c.packetIDSequence++
 
-	// Send empty request to trigger the mirror
-	if err := c.writePacket(dummyID, packetExecCommand, ""); err != nil {
+	if err := c.writePacket(dummyID, packetResponse, ""); err != nil {
 		return "", fmt.Errorf("failed to send terminal packet: %w", err)
 	}
 
 	var responseBuilder strings.Builder
 
-	// 3. Read continuously until we see the dummy packet ID echoed back.
+	// 3. Read continuously until we see the mirrored dummy packet ID.
 	for {
 		pID, pType, body, err := c.readPacket()
 		if err != nil {
@@ -182,17 +182,13 @@ func (c *RCONClient) Execute(cmd string) (string, error) {
 
 		if pType == packetResponse {
 			if pID == dummyID {
-				// We reached the end of the multi-packet stream via the echoed dummy packet!
+				// We received the mirrored dummy packet — all real response data is in.
+				// SRCDS sends one more trailing packet with body 0x00000001 0x00000000;
+				// consume it so it doesn't leak into the next command's response.
+				_, _, _, _ = c.readPacket()
 				break
 			}
 			if pID == cmdID {
-				// Some Valve forks (CS:GO, TF2) don't actually mirror the dummy packet ID correctly.
-				// Instead they will send an completely empty body packet with the *original* cmdID
-				// to signal the end of the stream.
-				if body == "" || body == "\x00\x00" {
-					break
-				}
-				// Part of our actual response output
 				responseBuilder.WriteString(body)
 			}
 		}
