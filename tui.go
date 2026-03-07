@@ -169,9 +169,8 @@ type rconResponseMsg struct {
 	reconnected bool // indicates if we had to auto-reconnect before sending
 }
 
-// findResultMsg is returned after querying the server with `find <prefix>`.
-type findResultMsg struct {
-	prefix   string
+// cvarlistResultMsg is returned after fetching the full command list from the server.
+type cvarlistResultMsg struct {
 	commands []Command
 	err      error
 }
@@ -201,9 +200,7 @@ type model struct {
 	suggestions     []Command
 	selectedIdx     int
 	showSuggestions bool
-	findCache       map[string][]Command // cache of find query results
-	lastFindPrefix  string               // last prefix sent to server
-	findInFlight    bool                 // whether a find query is pending
+	serverCommands  []Command // full list fetched once via cvarlist
 
 	// Command history
 	history    []string
@@ -234,8 +231,8 @@ func newModel(connected bool, logListener *LogListener, serverAddr string, rconP
 		connected:    connected,
 		history:      make([]string, 0),
 		historyIdx:   -1,
-		findCache:    make(map[string][]Command),
-		theme:        t,
+
+		theme: t,
 	}
 }
 
@@ -302,27 +299,32 @@ func (m model) Init() tea.Cmd {
 		})
 	}
 
+	// Fetch the full command/cvar list once at connection time.
+	if m.connected {
+		cmds = append(cmds, fetchCvarlist(m.serverAddr, m.rconPassword))
+	}
+
 	return tea.Batch(cmds...)
 }
 
-// findOnServer creates a fresh RCON connection, runs `find <prefix>`, and disconnects.
-// Using a one-shot connection avoids TCP buffer bleed from large responses.
-func findOnServer(addr, password, prefix string) tea.Cmd {
+// fetchCvarlist creates a fresh RCON connection, runs `cvarlist`, and returns
+// the full list of server commands/cvars. Called once at connection time.
+func fetchCvarlist(addr, password string) tea.Cmd {
 	return func() tea.Msg {
 		client, err := Connect(addr, password)
 		if err != nil {
-			return findResultMsg{prefix: prefix, err: err}
+			return cvarlistResultMsg{err: err}
 		}
 		defer func() {
 			_ = client.Close()
 		}()
 
-		resp, err := client.Execute("find " + prefix)
+		resp, err := client.Execute("cvarlist")
 		if err != nil {
-			return findResultMsg{prefix: prefix, err: err}
+			return cvarlistResultMsg{err: err}
 		}
-		cmds := ParseFindOutput(resp)
-		return findResultMsg{prefix: prefix, commands: cmds}
+		cmds := ParseCvarlistOutput(resp)
+		return cvarlistResultMsg{commands: cmds}
 	}
 }
 
@@ -397,16 +399,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.GotoBottom()
 		return m, nil
 
-	case findResultMsg:
-		m.findInFlight = false
+	case cvarlistResultMsg:
 		if msg.err == nil && len(msg.commands) > 0 {
-			// Cache the server results.
-			m.findCache[msg.prefix] = msg.commands
-			// Refresh suggestions if the user is still typing the same prefix.
-			currentInput := strings.TrimSpace(m.textInput.Value())
-			if strings.HasPrefix(strings.ToLower(currentInput), strings.ToLower(msg.prefix)) {
-				m.refreshSuggestions()
-			}
+			m.serverCommands = msg.commands
+			m.appendLog(lipgloss.NewStyle().Foreground(m.theme.Success).Render(
+				fmt.Sprintf("✓ Loaded %d commands/cvars for autocomplete", len(msg.commands))))
+			m.viewport.SetContent(strings.Join(m.logLines, "\n"))
+			m.viewport.GotoBottom()
+			m.refreshSuggestions()
+		} else if msg.err != nil {
+			m.appendLog(m.theme.ErrorLog.Render("✗ Failed to fetch cvarlist: " + msg.err.Error()))
+			m.viewport.SetContent(strings.Join(m.logLines, "\n"))
+			m.viewport.GotoBottom()
 		}
 		return m, nil
 	}
@@ -500,10 +504,6 @@ func (m *model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 		m.updateSuggestions()
-		findCmd := m.maybeFindOnServer()
-		if findCmd != nil {
-			return m, tea.Batch(inputCmd, findCmd)
-		}
 		return m, inputCmd
 	}
 }
@@ -608,14 +608,12 @@ func (m *model) refreshSuggestions() {
 		}
 	}
 
-	for _, cmds := range m.findCache {
-		for _, c := range cmds {
-			// Don't accidentally override our local commands with the server's version
-			// (e.g., the server's "exit" command shutting down the actual game server)
-			if !seen[c.Name] && strings.HasPrefix(strings.ToLower(c.Name), strings.ToLower(input)) {
-				matches = append(matches, c)
-				seen[c.Name] = true
-			}
+	for _, c := range m.serverCommands {
+		// Don't accidentally override our local commands with the server's version
+		// (e.g., the server's "exit" command shutting down the actual game server)
+		if !seen[c.Name] && strings.HasPrefix(strings.ToLower(c.Name), strings.ToLower(input)) {
+			matches = append(matches, c)
+			seen[c.Name] = true
 		}
 	}
 
@@ -631,37 +629,6 @@ func (m *model) refreshSuggestions() {
 	if m.selectedIdx >= len(matches) {
 		m.selectedIdx = 0
 	}
-}
-
-// maybeFindOnServer triggers an async `find` query if the input is long enough
-// and we haven't already queried this prefix. Creates a one-shot RCON connection
-// for each query to avoid TCP buffer bleed from large responses.
-func (m *model) maybeFindOnServer() tea.Cmd {
-	if m.rconPassword == "" || m.findInFlight {
-		return nil
-	}
-
-	input := strings.TrimSpace(m.textInput.Value())
-	if len(input) < 3 {
-		return nil
-	}
-
-	// Use the input as the find prefix.
-	prefix := strings.ToLower(input)
-
-	// Check if we already have cached results for this prefix.
-	if _, ok := m.findCache[prefix]; ok {
-		return nil
-	}
-
-	// Don't re-query the same prefix.
-	if prefix == m.lastFindPrefix {
-		return nil
-	}
-
-	m.lastFindPrefix = prefix
-	m.findInFlight = true
-	return findOnServer(m.serverAddr, m.rconPassword, prefix)
 }
 
 func (m *model) appendLog(line string) {

@@ -103,7 +103,7 @@ func main() {
 		m.logLines = append(m.logLines,
 			"",
 			lipgloss.NewStyle().Foreground(m.theme.Dim).Render(
-				"  Type a command and press Enter. Start typing (3+ chars) for autocomplete."),
+				"  Type a command and press Enter. Tab to autocomplete."),
 			"",
 		)
 	} else {

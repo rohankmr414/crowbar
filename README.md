@@ -9,7 +9,7 @@ Works with **CS:GO, CS2, TF2, Garry's Mod, L4D2, Rust**, and any other game usin
 
 ## Features
 
-- **Live autocomplete** — queries server with `find <prefix>` as you type to discover commands and cvars
+- **Live autocomplete** — fetches commands and cvars via `cvarlist` at connection time for instant, lag-free suggestions
 - **Real-time log streaming** — receives server logs via UDP and automatically filters out polling noise
 - **Raw multi-packet support** — custom TCP RCON parser completely bypasses the `cvarlist` truncation bug found in standard libraries
 - **Quality of life** — command history (↑/↓), local display clearing (`Ctrl+L`), disconnected mode, and dynamic game-specific themes
@@ -93,7 +93,7 @@ crowbar -H 10.0.0.5 -P secret -l 27200
 
 1. **RCON** — connects over TCP using the [Source RCON Protocol](https://developer.valvesoftware.com/wiki/Source_RCON_Protocol)
 2. **Log streaming** — auto-detects your public IP and sends `logaddress_add` so the server streams logs via UDP
-3. **Autocomplete** — creates one-shot RCON connections to run `find <prefix>`, discovering commands/cvars directly from the server
+3. **Autocomplete** — fetches the full command/cvar list via `cvarlist` once at connection time, then filters locally for instant suggestions
 4. **TUI** — built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) (Elm-architecture)
 
 ## Built With

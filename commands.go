@@ -57,6 +57,59 @@ func ParseFindOutput(output string) []Command {
 	return cmds
 }
 
+// ParseCvarlistOutput parses the output of the `cvarlist` RCON command.
+// The output format is lines like:
+//
+//	sv_cheats                      : 0          : , "notify", "rep"     : Allow cheats on server
+//	mp_autoteambalance             : 1          :                      :
+//	askconnect_accept              : cmd        :                      : Accept a redirect request by the server.
+//
+// Each line has the format: name : value_or_cmd : flags : description
+// The last line is typically a summary like "total convars/concommands".
+func ParseCvarlistOutput(output string) []Command {
+	var cmds []Command
+	seen := make(map[string]bool)
+
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// Skip summary/footer lines (e.g. "350 total convars/concommands")
+		if strings.Contains(line, "total convars") || strings.Contains(line, "total concommands") {
+			continue
+		}
+
+		// Split into at most 4 parts on " : "
+		parts := strings.SplitN(line, " : ", 4)
+		if len(parts) < 2 {
+			continue
+		}
+
+		name := strings.TrimSpace(parts[0])
+		if name == "" || seen[name] {
+			continue
+		}
+
+		// Skip lines that start with `-` (sometimes footer separators)
+		if strings.HasPrefix(name, "-") {
+			continue
+		}
+
+		seen[name] = true
+
+		desc := ""
+		if len(parts) >= 4 {
+			desc = strings.TrimSpace(parts[3])
+		}
+
+		cmds = append(cmds, Command{Name: name, Description: desc})
+	}
+
+	return cmds
+}
+
 // FilterCommands returns commands from the given list whose name starts with the given prefix.
 func FilterCommands(prefix string, cmds []Command) []Command {
 	if prefix == "" || len(cmds) == 0 {
