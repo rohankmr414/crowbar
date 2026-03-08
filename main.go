@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -119,8 +121,27 @@ func main() {
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
+
+	// Catch SIGTERM/SIGINT so we can run cleanup before exiting.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-sigCh
+		p.Quit()
+	}()
+
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error running TUI: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Graceful shutdown: remove our logaddress entry from the server.
+	if rconClient != nil && detectedIP != "" {
+		cleanupClient, err := Connect(serverAddr, *password)
+		if err == nil {
+			cmd := fmt.Sprintf("logaddress_del %s:%d", detectedIP, *logPort)
+			_, _ = cleanupClient.Execute(cmd)
+			_ = cleanupClient.Close()
+		}
 	}
 }
