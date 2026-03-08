@@ -2,6 +2,8 @@ package main
 
 import (
 	"strings"
+
+	"github.com/sahilm/fuzzy"
 )
 
 // Command represents a server console command/cvar with an optional description.
@@ -123,4 +125,28 @@ func FilterCommands(prefix string, cmds []Command) []Command {
 		}
 	}
 	return matches
+}
+
+// RankCommandsFuzzy returns commands ranked by fuzzy relevance using sahilm/fuzzy.
+func RankCommandsFuzzy(query string, cmds []Command) []Command {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" || len(cmds) == 0 {
+		return nil
+	}
+
+	names := make([]string, 0, len(cmds))
+	for _, cmd := range cmds {
+		names = append(names, strings.ToLower(cmd.Name))
+	}
+
+	matches := fuzzy.Find(query, names)
+	if len(matches) == 0 {
+		return nil
+	}
+
+	out := make([]Command, 0, len(matches))
+	for _, m := range matches {
+		out = append(out, cmds[m.Index])
+	}
+	return out
 }

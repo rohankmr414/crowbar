@@ -601,17 +601,15 @@ func (m *model) refreshSuggestions() {
 		{Name: "quit", Description: "Close the crowbar application"},
 	}
 
-	for _, c := range localCommands {
-		if strings.HasPrefix(c.Name, strings.ToLower(input)) {
-			matches = append(matches, c)
-			seen[c.Name] = true
-		}
+	for _, c := range RankCommandsFuzzy(input, localCommands) {
+		matches = append(matches, c)
+		seen[c.Name] = true
 	}
 
-	for _, c := range m.serverCommands {
+	for _, c := range RankCommandsFuzzy(input, m.serverCommands) {
 		// Don't accidentally override our local commands with the server's version
 		// (e.g., the server's "exit" command shutting down the actual game server)
-		if !seen[c.Name] && strings.HasPrefix(strings.ToLower(c.Name), strings.ToLower(input)) {
+		if !seen[c.Name] {
 			matches = append(matches, c)
 			seen[c.Name] = true
 		}
