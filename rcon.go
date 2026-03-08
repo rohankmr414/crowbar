@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -19,7 +20,13 @@ const (
 	packetResponse     int32 = 0
 
 	packetHeaderSize = 10
+	// Valve docs state 4096 max packet size, which we enforce for outbound requests.
+	maxRequestPacketSize = 4096
+	// Some servers emit larger inbound chunks in practice (e.g. cvarlist), so be tolerant.
+	maxResponsePacketSize = 8192
 )
+
+var ErrPartialResponse = errors.New("partial rcon response")
 
 // RCONClient implements a raw Source Engine RCON protocol client with proper
 // multi-packet response handling (which standard Go RCON libraries lack).
@@ -41,7 +48,7 @@ func Connect(addr, password string) (*RCONClient, error) {
 		conn:             conn,
 		addr:             addr,
 		timeout:          30 * time.Second,
-		packetIDSequence: 100, // start at arbitrary ID
+		packetIDSequence: 100, // start at arbitrary positive ID
 	}
 
 	// Authenticate
@@ -55,7 +62,11 @@ func Connect(addr, password string) (*RCONClient, error) {
 
 // readPacket reads a single RCON packet from the TCP stream.
 func (c *RCONClient) readPacket() (id int32, pType int32, body string, err error) {
-	_ = c.conn.SetReadDeadline(time.Now().Add(c.timeout))
+	return c.readPacketWithTimeout(c.timeout)
+}
+
+func (c *RCONClient) readPacketWithTimeout(timeout time.Duration) (id int32, pType int32, body string, err error) {
+	_ = c.conn.SetReadDeadline(time.Now().Add(timeout))
 
 	// Read packet size (4 bytes)
 	var size int32
@@ -63,7 +74,7 @@ func (c *RCONClient) readPacket() (id int32, pType int32, body string, err error
 		return 0, 0, "", err
 	}
 
-	if size < packetHeaderSize || size > 8192 {
+	if size < packetHeaderSize || size > maxResponsePacketSize {
 		return 0, 0, "", fmt.Errorf("invalid packet size: %d", size)
 	}
 
@@ -76,6 +87,9 @@ func (c *RCONClient) readPacket() (id int32, pType int32, body string, err error
 	// Parse payload: ID (4) + Type (4) + Body (size-10) + Null x2 (2)
 	id = int32(binary.LittleEndian.Uint32(payload[0:4]))
 	pType = int32(binary.LittleEndian.Uint32(payload[4:8]))
+	if payload[len(payload)-2] != 0x00 || payload[len(payload)-1] != 0x00 {
+		return 0, 0, "", fmt.Errorf("malformed packet: missing null terminators")
+	}
 
 	// -10 because ID(4) + Type(4) + two null bytes(2) = 10
 	bodyBytes := payload[8 : size-2]
@@ -90,6 +104,9 @@ func (c *RCONClient) writePacket(id int32, pType int32, body string) error {
 
 	bodyBytes := []byte(body)
 	size := int32(len(bodyBytes) + packetHeaderSize)
+	if size > maxRequestPacketSize {
+		return fmt.Errorf("packet too large: %d bytes (max %d)", size, maxRequestPacketSize)
+	}
 
 	buf := new(bytes.Buffer)
 	_ = binary.Write(buf, binary.LittleEndian, size)
@@ -106,39 +123,32 @@ func (c *RCONClient) auth(password string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	id := c.packetIDSequence
-	c.packetIDSequence++
+	id := c.nextPacketID()
 
 	if err := c.writePacket(id, packetAuth, password); err != nil {
 		return err
 	}
 
-	// Wait for response padding packet (some engines send this, some don't)
-	respID, pType, _, err := c.readPacket()
-	if err != nil {
-		return err
-	}
-
-	if pType == packetResponse {
-		// Read the actual auth response packet
-		respID, pType, _, err = c.readPacket()
+	// Some engines send a packetResponse before packetAuthResponse.
+	for {
+		respID, pType, _, err := c.readPacket()
 		if err != nil {
 			return err
 		}
+		if pType == packetResponse {
+			continue
+		}
+		if pType != packetAuthResponse {
+			return fmt.Errorf("unexpected packet type during auth: %d", pType)
+		}
+		if respID == -1 {
+			return fmt.Errorf("invalid password")
+		}
+		if respID != id {
+			return fmt.Errorf("auth packet ID mismatch: got %d, want %d", respID, id)
+		}
+		return nil
 	}
-
-	if pType != packetAuthResponse {
-		return fmt.Errorf("unexpected packet type during auth: %d", pType)
-	}
-
-	if respID == -1 {
-		return fmt.Errorf("invalid password")
-	}
-	if respID != id {
-		return fmt.Errorf("auth packet ID mismatch: got %d, want %d", respID, id)
-	}
-
-	return nil
 }
 
 // Execute sends a command and seamlessly aggregates multi-packet responses.
@@ -146,8 +156,7 @@ func (c *RCONClient) Execute(cmd string) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	cmdID := c.packetIDSequence
-	c.packetIDSequence++
+	cmdID := c.nextPacketID()
 
 	// 1. Send the actual command.
 	if err := c.writePacket(cmdID, packetExecCommand, cmd); err != nil {
@@ -160,8 +169,7 @@ func (c *RCONClient) Execute(cmd string) (string, error) {
 	// mirrored packet guarantees all meaningful response packets have been received.
 	// After the mirror, SRCDS also sends a follow-up packet with body 0x00000001 0x00000000.
 	// Reference: https://developer.valvesoftware.com/wiki/Source_RCON_Protocol#Multiple-packet_Responses
-	dummyID := c.packetIDSequence
-	c.packetIDSequence++
+	dummyID := c.nextPacketID()
 
 	if err := c.writePacket(dummyID, packetResponse, ""); err != nil {
 		return "", fmt.Errorf("failed to send terminal packet: %w", err)
@@ -173,9 +181,9 @@ func (c *RCONClient) Execute(cmd string) (string, error) {
 	for {
 		pID, pType, body, err := c.readPacket()
 		if err != nil {
-			if len(responseBuilder.String()) > 0 {
-				// If we got *some* data before the error, just return what we have (best effort)
-				return responseBuilder.String(), nil
+			partial := responseBuilder.String()
+			if partial != "" {
+				return partial, fmt.Errorf("%w: %v", ErrPartialResponse, err)
 			}
 			return "", err
 		}
@@ -183,9 +191,6 @@ func (c *RCONClient) Execute(cmd string) (string, error) {
 		if pType == packetResponse {
 			if pID == dummyID {
 				// We received the mirrored dummy packet — all real response data is in.
-				// SRCDS sends one more trailing packet with body 0x00000001 0x00000000;
-				// consume it so it doesn't leak into the next command's response.
-				_, _, _, _ = c.readPacket()
 				break
 			}
 			if pID == cmdID {
@@ -207,6 +212,15 @@ func (c *RCONClient) Close() error {
 // Addr returns the server address this client is connected to.
 func (c *RCONClient) Addr() string {
 	return c.addr
+}
+
+// nextPacketID returns the next request ID and avoids the -1 failure sentinel.
+func (c *RCONClient) nextPacketID() int32 {
+	c.packetIDSequence++
+	if c.packetIDSequence <= 0 || c.packetIDSequence == -1 {
+		c.packetIDSequence = 1
+	}
+	return c.packetIDSequence
 }
 
 // rconFromPattern matches 'rcon from "IP:port"' in server responses.
