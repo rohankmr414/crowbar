@@ -49,8 +49,8 @@ crowbar -H <host> -p <port> -P <password> [-l <log-port>]
 | `--host` | `-H` | `127.0.0.1` | Server IP address |
 | `--port` | `-p` | `27015` | Server RCON port |
 | `--password` | `-P` | *(required)* | RCON password |
-| `--log-port` | `-l` | `27115` | Local UDP port for receiving log stream |
-| `--public-ip` | | *(auto-detected)* | Your public IP for log streaming |
+| `--log-port` | `-l` | `27115` | Local UDP port for receiving log stream (must be reachable by the game server) |
+| `--public-ip` | | *(auto-detected)* | Public IP to advertise for UDP log streaming |
 
 ### Examples
 
@@ -67,6 +67,16 @@ crowbar -H 10.0.0.5 -p 27025 -P secret
 # Use a custom log port
 crowbar -H 10.0.0.5 -P secret -l 27200
 ```
+
+## UDP Log Streaming Limitations
+
+Crowbar receives logs over UDP using `logaddress_add`. This requires network reachability from the game server to your machine.
+
+- If you are behind NAT/router, forward UDP `--log-port` to the machine running crowbar.
+- Allow inbound UDP on your OS/cloud firewall for `--log-port`.
+- If auto-detected IP is wrong (VPN, CGNAT, multi-WAN), set `--public-ip` manually.
+- Some ISPs use CGNAT or carrier-level firewalls that block unsolicited inbound UDP, so port forwarding may not be possible on residential/mobile connections.
+- Some hosting/VPN setups block inbound UDP entirely; in that case command execution still works, but live log streaming will not.
 
 ## Key Bindings
 
