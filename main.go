@@ -42,6 +42,8 @@ func main() {
 		_ = logListener.Close()
 	}()
 
+	logListener.Start()
+
 	// Connect via RCON.
 	fmt.Printf("Connecting to %s...\n", serverAddr)
 	rconClient, err := Connect(serverAddr, *password)
